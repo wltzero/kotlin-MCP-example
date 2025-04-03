@@ -10,8 +10,10 @@ version = "0.0.1-SNAPSHOT"
 repositories {
     mavenCentral()
 }
+
 val mcpVersion = "0.4.0"
 val ktorVersion = "3.1.1"
+val koinVersion = "4.0.2"
 
 dependencies {
     testImplementation(kotlin("test"))
@@ -21,9 +23,16 @@ dependencies {
     implementation("io.ktor:ktor-server-core:$ktorVersion")
     implementation("io.ktor:ktor-server-netty:$ktorVersion")
 
+    implementation(project.dependencies.platform("io.insert-koin:koin-bom:$koinVersion"))
+    implementation("io.insert-koin:koin-core")
+    implementation("io.insert-koin:koin-ktor")
+    implementation("io.insert-koin:koin-logger-slf4j")
+
     implementation("io.github.microutils:kotlin-logging-jvm:2.1.23")
-    /*stdio method use blow*/
+
     implementation("ch.qos.logback:logback-classic:1.4.14")
+
+
 }
 
 
