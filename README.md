@@ -7,12 +7,16 @@
 3. 读取指定目录下的所有文件及文件夹
 4. 创建目录
 5. 编辑替换文本文件中的内容
+6. 检索对应网页的内容
+7. 查找文件
+8. 写入文件
+
 
 ## 运行项目
 
 ```bash
 ./gradle build 
-java -jar filePath/build/libs/mcp-server-0.0.1-SNAPSHOT.jar
+java -jar project/build/libs/mcp-server-0.0.1-SNAPSHOT.jar
 ```
 
 本项目使用SSE进行client及server之间的交互，选用ktor作为http框架进行server的构建，因此需要暴露一个端口，通常使用该地址**http://localhost:8080/sse** 注册到MCP client

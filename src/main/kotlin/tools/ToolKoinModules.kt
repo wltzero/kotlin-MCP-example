@@ -4,23 +4,30 @@ import io.modelcontextprotocol.kotlin.sdk.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.TextContent
 import io.modelcontextprotocol.kotlin.sdk.Tool
 import io.modelcontextprotocol.kotlin.sdk.server.RegisteredTool
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
+import kotlinx.io.IOException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import mu.KotlinLogging
+import org.jsoup.Jsoup
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
+import utils.cleanHtmlThoroughly
 import utils.generateDiff
 import utils.normalizeLineEnding
 import utils.parseEdits
 import java.io.File
-import java.io.IOException
+import java.nio.charset.StandardCharsets
+import java.nio.file.FileSystems
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
-import kotlin.text.split
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.StandardOpenOption
+import java.nio.file.attribute.BasicFileAttributes
+import java.util.regex.PatternSyntaxException
 
 private val log = KotlinLogging.logger {}
 
@@ -224,7 +231,7 @@ val toolModule = module {
                                  输入的修改参数允许有两种格式：
                                  1. JSON对象：{"oldText":"要替换的文本","newText":"替换文本"}
                                  2. JSON数组：[{"oldText":"要替换的文本","newText":"替换文本"},{"oldText":"要替换的文本2","newText":"替换文本2"}]
-                              """.trimMargin(),
+                              """.trimIndent(),
                 inputSchema = Tool.Input(
                     properties = JsonObject(
                         mapOf(
@@ -261,7 +268,7 @@ val toolModule = module {
                 )
             }
             log.debug { "path: $path, edits: $edits, dryRun: $dryRun" }
-            log.info { "当前正在以${if(dryRun) "模拟运行" else "正式运行"}模式运行" }
+            log.info { "当前正在以${if (dryRun) "模拟运行" else "正式运行"}模式运行" }
             val filePath = Paths.get(path)
             if (!Files.exists(filePath)) {
                 log.warn { "文件不存在: $path" }
@@ -290,7 +297,7 @@ val toolModule = module {
                 }
                 val normalizedContent = normalizeLineEnding(newContent)
                 val normalizedOldText = normalizeLineEnding(oldText)
-                if(!normalizedContent.contains(normalizedOldText)){
+                if (!normalizedContent.contains(normalizedOldText)) {
                     log.info { "文件内容对于该替换不存在要替换的内容: $oldText, $newText" }
                     return@forEach
                 }
@@ -298,11 +305,218 @@ val toolModule = module {
                 appliedEdits.add(oldText)
             }
             val diff = generateDiff(path, originContent, newContent)
-            log.info{ diff }
-            if(!dryRun && originContent!=newContent){
+            log.info { diff }
+            if (!dryRun && originContent != newContent) {
                 Files.writeString(filePath, newContent)
             }
-            CallToolResult(content = listOf(TextContent("文件内容修改成功，当前运行状态为 ${if(dryRun) "模拟运行" else "正式运行"}，修改了${appliedEdits.size}处内容，应用的修改项包括${appliedEdits.joinToString(",")}，详细修改如下：\n$diff")))
+            CallToolResult(
+                content = listOf(
+                    TextContent(
+                        "文件内容修改成功，当前运行状态为 ${if (dryRun) "模拟运行" else "正式运行"}，修改了${appliedEdits.size}处内容，应用的修改项包括${
+                            appliedEdits.joinToString(
+                                ","
+                            )
+                        }，详细修改如下：\n$diff"
+                    )
+                )
+            )
+        }
+    }
+
+    single<RegisteredTool>(named("fetchWebPageContent")) {
+        RegisteredTool(
+            Tool(
+                name = "获取网页内容",
+                description = """获取多个指定URL的网页内容，并返回一个JSON ARRAY对象。""".trimIndent(),
+                inputSchema = Tool.Input(
+                    properties = JsonObject(
+                        mapOf(
+                            "urls" to JsonObject(
+                                mapOf(
+                                    "type" to JsonPrimitive("string"),
+                                    "description" to JsonPrimitive("要获取的URL，用英文逗号分隔")
+                                )
+                            )
+                        )
+                    ),
+                    required = listOf("url")
+                )
+            )
+        ) { request ->
+            var urls = request.arguments["urls"]?.jsonPrimitive?.content
+            if (urls.isNullOrBlank()) {
+                return@RegisteredTool CallToolResult(
+                    content = listOf(TextContent("The 'urls' parameter is required."))
+                )
+            }
+            try {
+                val docList = urls.split(",")
+                    .map { it.trim() }
+                    .map {
+                        val doc = Jsoup.connect(it).timeout(50000).get()
+                        JsonObject(
+                            mapOf(
+                                "url" to JsonPrimitive(it),
+                                "title" to JsonPrimitive(doc.title()),
+                                "content" to JsonPrimitive(cleanHtmlThoroughly(doc.body().text()))
+                            )
+                        )
+                    }.toList()
+                log.info { docList.toString() }
+                CallToolResult(content = listOf(TextContent(docList.toString())))
+            } catch (e: Exception) {
+                log.error(e) { "获取网页内容失败，${e.message}" }
+                CallToolResult(content = listOf(TextContent("获取网页内容失败，请检查URL是否正确，错误信息为：${e.message}")))
+            }
+        }
+    }
+
+    single<RegisteredTool>(named("searchFiles")) {
+        RegisteredTool(
+            Tool(
+                name = "搜索文件",
+                description = """递归搜索与模式匹配的文件和目录。搜索
+                                 起始路径。搜索不区分大小写，并匹配部分名称。返回所有匹配项的完整路径
+                                 项目。非常适合在不知道文件的确切位置时查找文件。""".trimIndent(),
+                inputSchema = Tool.Input(
+                    properties = JsonObject(
+                        mapOf(
+                            "path" to JsonObject(
+                                mapOf(
+                                    "type" to JsonPrimitive("string"),
+                                    "description" to JsonPrimitive("搜索的起始路径")
+                                )
+                            ),
+                            "pattern" to JsonObject(
+                                mapOf(
+                                    "type" to JsonPrimitive("string"),
+                                    "description" to JsonPrimitive("搜索用pattern")
+                                )
+                            )
+                        )
+                    ),
+                    required = listOf("path", "pattern")
+                )
+            )
+        ) { request ->
+            val path = request.arguments["path"]?.jsonPrimitive?.content
+            val pattern = request.arguments["pattern"]?.jsonPrimitive?.content
+            if (path.isNullOrBlank() || pattern.isNullOrBlank()) {
+                return@RegisteredTool CallToolResult(
+                    content = listOf(TextContent("The 'path' and 'pattern' parameters are required."))
+                )
+            }
+            try {
+
+                val filePath = Paths.get(path)
+                if (!Files.exists(filePath)) {
+                    log.error { "搜索路径不存在" }
+                    return@RegisteredTool CallToolResult(listOf(TextContent("搜索路径不存在")))
+                }
+                /*init pattern matcher*/
+                var normalizedPattern = pattern
+                if (!pattern.startsWith("glob:")) {
+                    normalizedPattern = "glob:*$normalizedPattern*"
+                }
+                val matcher = FileSystems.getDefault().getPathMatcher(normalizedPattern)
+
+                val matchingPaths = mutableListOf<String>()
+                Files.walkFileTree(filePath, object : SimpleFileVisitor<Path>() {
+                    override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                        val relativizePath = filePath.relativize(file)
+                        if (matcher.matches(relativizePath) ||
+                            matcher.matches(file.fileName)
+                        ) {
+                            matchingPaths.add(file.toString())
+                        }
+                        return FileVisitResult.CONTINUE
+                    }
+
+                    override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
+                        /* exclude hidden directories (starting with '.')*/
+                        if (dir.nameCount > 0 &&
+                            ((dir.getName(dir.nameCount - 1).startsWith(".")) ||
+                                    dir.getName(dir.nameCount - 1).startsWith("target"))
+                        ) {
+                            return FileVisitResult.SKIP_SUBTREE
+                        }
+                        val relativizePath = filePath.relativize(dir)
+
+                        if (matcher.matches(dir.fileName) || matcher.matches(relativizePath)) {
+                            matchingPaths.add(dir.toString())
+                        }
+                        return FileVisitResult.CONTINUE
+                    }
+                })
+                log.info { "搜索到文件：$matchingPaths" }
+                CallToolResult(listOf(TextContent(matchingPaths.toString())))
+            }catch (e: PatternSyntaxException){
+                log.error(e) { "搜索文件失败，pattern异常，${e.message}" }
+                CallToolResult(listOf(TextContent("搜索文件失败，请检查pattern是否正确，错误信息为：${e.message}")))
+            }catch (e: Exception) {
+                log.error(e) { "搜索文件失败，${e.message}" }
+                CallToolResult(listOf(TextContent("搜索文件失败，未知错误，错误信息为：${e.message}")))
+            }
+        }
+    }
+
+    single<RegisteredTool>(named("writeFile")) {
+        RegisteredTool(
+            Tool(
+                name = "写入文件",
+                description = """创建新文件或用新内容完全覆盖现有文件。须谨慎使用，因为它会在不发出警告的情况下覆盖现有文件。
+                                 使用适当的编码处理文本内容。""".trimIndent(),
+                inputSchema = Tool.Input(
+                    properties = JsonObject(
+                        mapOf(
+                            "path" to JsonObject(
+                                mapOf(
+                                    "type" to JsonPrimitive("string"),
+                                    "description" to JsonPrimitive("写入文件的路径")
+                                )
+                            ),
+                            "content" to JsonObject(
+                                mapOf(
+                                    "type" to JsonPrimitive("string"),
+                                    "description" to JsonPrimitive("写入文件的内容")
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        ){request->
+            val path = request.arguments["path"]?.jsonPrimitive?.content
+            val content = request.arguments["content"]?.jsonPrimitive?.content
+            if (path.isNullOrBlank() || content.isNullOrBlank()) {
+                return@RegisteredTool CallToolResult(
+                    content = listOf(TextContent("The 'path' and 'content' parameters are required."))
+                )
+            }
+            try {
+                val filePath = Paths.get(path)
+                /*make sure the parent path exist, create parent directories if they don't exist*/
+                val parent = filePath.parent
+                if (parent != null && !Files.exists(parent)) {
+                    log.info("创建目录：$parent")
+                    Files.createDirectories(parent)
+                }
+                /*write content*/
+                val exists = Files.exists(filePath)
+                if (exists) {
+                    /*备份文件*/
+                    filePath.toFile().copyTo(File("$filePath.bak"), true)
+                    log.info("覆盖文件：$filePath, 已备份到${filePath}.bak")
+                } else {
+                    log.info("创建文件：$filePath")
+                }
+                Files.writeString(filePath, content, StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
+                CallToolResult(listOf(TextContent("文件写入成功, 文件路径为：$path")))
+            } catch (e: Exception) {
+                log.error(e) { "写入文件失败，${e.message}" }
+                CallToolResult(listOf(TextContent("写入文件失败，未知错误，错误信息为：${e.message}")))
+            }
         }
     }
 }
