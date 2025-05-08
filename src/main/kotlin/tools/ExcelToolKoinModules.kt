@@ -67,8 +67,8 @@ val excelToolModule = module{
     single<RegisteredTool>(named("readSheet")) {
         RegisteredTool(
             Tool(
-                name = "读取sheet",
-                description = "读取excel文件，获取特定名称的sheet",
+                name = "获取excel中sheet的内容",
+                description = "读取excel文件，获取特定名称的sheet中的结构化内容，以json格式返回",
                 inputSchema = Tool.Input(
                     properties = JsonObject(
                         mapOf(
@@ -81,7 +81,7 @@ val excelToolModule = module{
                             "sheetName" to JsonObject(
                                 mapOf(
                                     "type" to JsonPrimitive("string"),
-                                    "description" to JsonPrimitive("原始文件名称")
+                                    "description" to JsonPrimitive("sheet名称")
                                 )
                             ),
                             "skipTitleRowNum" to JsonObject(
