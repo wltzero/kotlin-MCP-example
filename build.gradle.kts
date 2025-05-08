@@ -11,7 +11,7 @@ repositories {
     mavenCentral()
 }
 
-val mcpVersion = "0.4.0"
+val mcpVersion = "0.5.0"
 val ktorVersion = "3.1.1"
 val koinVersion = "4.0.2"
 
@@ -33,6 +33,8 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:1.4.14")
     implementation("org.jsoup:jsoup:1.17.2")
 
+    implementation("cn.idev.excel:fastexcel:1.2.0")
+    implementation("org.apache.poi:poi:5.2.5")
 
 }
 

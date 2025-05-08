@@ -9,7 +9,8 @@ import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.server.mcp
 import org.koin.ktor.ext.getKoin
 import org.koin.ktor.plugin.koin
-import tools.toolModule
+import tools.excelToolModule
+import tools.simpleToolModule
 
 
 /*TODO)) 添加全局操作系统事务*/
@@ -23,7 +24,8 @@ fun main() {
 
 fun Application.mainModule() {
     koin {
-        modules(toolModule)
+        modules(simpleToolModule)
+        modules(excelToolModule)
     }
 
     /*register the mcp server*/

@@ -4,7 +4,6 @@ import io.modelcontextprotocol.kotlin.sdk.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.TextContent
 import io.modelcontextprotocol.kotlin.sdk.Tool
 import io.modelcontextprotocol.kotlin.sdk.server.RegisteredTool
-import kotlinx.io.IOException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -32,7 +31,7 @@ import java.util.regex.PatternSyntaxException
 private val log = KotlinLogging.logger {}
 
 
-val toolModule = module {
+val simpleToolModule = module {
     single<RegisteredTool>(named("addTagsForMarkdown")) {
         RegisteredTool(
             Tool(
